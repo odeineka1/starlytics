@@ -19,6 +19,7 @@ from categories_kw import umbrella_words
 analyzer = SentimentIntensityAnalyzer()
 analyzer = SentimentIntensityAnalyzer()
 analyzer.lexicon.update({
+        # custom sentiment overrides for words VADER doesn't score well for review-specific context
         "modern": 2.0, 
         "expensive": -1.5, 
         "too": -2.0, 
@@ -39,6 +40,7 @@ categories_kw = categories_kw
 # score = analyzer.polarity_scores(text)
 
 class Review:
+    """A single customer review, plus the category/sentiment/keyword data attached to it after analysis."""
     def __init__(self, stars: int, text: str, timestamp: object, category: set={"Uncategorized"}, sentiment: dict={}, positive_keywords: dict={}, negative_keywords: dict={}):
         self.stars = stars
         self.text = text
@@ -58,6 +60,7 @@ Sentiment: {self.sentiment}
 engine = StarlyticsEngine()
 
 def main():
+    """Main menu loop: lets the user run a Solo Report, run a Battle Report, open Settings, or exit."""
     try:
         while True:
             try: 
@@ -70,7 +73,7 @@ def main():
                     business_name = input("Enter business name: ")
                     period_start, period_end = get_period()  
 
-                    file_name = "mock_reviews.csv"
+                    file_name = "mock_reviews.csv"  # placeholder dataset, swap for a real export later
                     
                     all_reviews, reviews_count = ingestor(period_start, period_end, file_name)
 
@@ -88,13 +91,13 @@ def main():
                         engine.process_keywords(all_reviews)
 
                         end_time = time.time()
-                        total_time = end_time-start_time
+                        total_time = end_time-start_time  # shown in the report as the analysis runtime
 
                     console.print("✅ [bold green]Analysis Complete![/]\n")
                     engine.generate_report(reviews_count, total_time, business_name)
                     engine.generate_ai_insight()
 
-                    main()
+                    main()  # loop back to the menu once the report is done
                 elif mode == "2":
                     business1_name = input("Enter first business name: ")
                     business2_name = input("Enter second business name: ")
@@ -113,7 +116,7 @@ def main():
                             review.sentiment = sentimentize_review(review)
                             review.positive_keywords, review.negative_keywords = get_keywords(review)
                         
-                        engine1 = StarlyticsEngine()
+                        engine1 = StarlyticsEngine()  # separate engine instance so business 1's numbers don't mix with business 2's
 
                         engine1.caculate_category_means(all_reviews1, engine)
                         engine1.check_for_alerts(all_reviews1)
@@ -158,9 +161,10 @@ def main():
             except ValueError:
                 print("Invalid Input")
     except KeyboardInterrupt:
-        sys.exit()
+        sys.exit()  # let ctrl+c close the program quietly instead of printing a traceback
 
 def settings_mode():
+    """Settings menu: lets the user tune alert thresholds, toggle recency weighting, pick the AI model, and set the Gemini API key."""
     while True:
         try:
             console.print(Rule(style="bright_cyan"))
@@ -193,6 +197,8 @@ def settings_mode():
                     
                 settings_info = Text()
                 settings_info.append("How Starlytics Alert System works:\n\n", style="bold yellow")
+                # this full explanation is repeated for every alert setting below so the user always sees
+                # how the setting they're about to change fits into the whole alert system, not just the one number
                 settings_info.append(
                     f"If within the past {engine.time_delta_hours} hours there are "
                     f"{engine.review_count_general_threshold} reviews with sentiment below "
@@ -433,7 +439,7 @@ def settings_mode():
                 settings_info.append("Starlytics relies on Google Gemini's large language models to analyze most frequent keywords and provide strategy based on them\n\n", style="white")
                 
                 settings_info.append("📊 Understanding Free Tier Quotas:\n", style="bold cyan")
-                settings_info.append("• Google AI Studio grants 20 requests per day (RPD) on standard free projects.\n", style="white")
+                settings_info.append("• Google AI Studio grants 20 requests per day (RPD) on standard free projects.\n", style="white")  # free-tier limit at time of writing, may drift if Google changes it
                 settings_info.append("• If your application throws a persistent 429 Resource Exhausted error, your current key has hit its daily ceiling.\n\n", style="white")
                 
                 settings_info.append("💡 Developer Tip: ", style="bold green")
@@ -445,7 +451,7 @@ def settings_mode():
                 current_key = os.environ.get("GEMINI_API_KEY")
                 settings_info.append("\nCurrent Status: ", style="bold white")
                 if current_key:
-                    masked_key = f"...{current_key[-4:]}" if len(current_key) > 4 else "Active"
+                    masked_key = f"...{current_key[-4:]}" if len(current_key) > 4 else "Active"  # only show the last 4 chars so the key isn't fully exposed on screen
                     settings_info.append(f"Connected (Key: {masked_key})", style="bold green")
                 else:
                     settings_info.append("Not Configured (AI features will fail)", style="bold red")
@@ -464,14 +470,14 @@ def settings_mode():
                         if not user_input:
                             settings_mode()
 
-                        os.environ["GEMINI_API_KEY"] = user_input
+                        os.environ["GEMINI_API_KEY"] = user_input  # stored for this session only, not persisted to disk
     
                         console.print("\n✅ Gemini API Key set successfully!\n", style="bold green")
                         settings_mode()
                     except ValueError:
                         console.print("\n❌ Invalid Input: Cannot proceed without an API Key. \n", style="bold red")
             elif not option:
-                main()
+                main()  # Enter with no option exits settings back to the main menu
             else:
                 raise ValueError
             break
@@ -479,6 +485,7 @@ def settings_mode():
             print("Invalid Input")
 
 def get_period():
+    """Prompts the user to pick a date range (preset or custom) and returns it as a (start, end) tuple of datetime objects."""
     while True:
         try:
             analysis_text = (
@@ -505,15 +512,15 @@ def get_period():
                 period_end = datetime.datetime.now()
                 period_start = period_end-time_period
             elif time_period == "2":
-                time_period = datetime.timedelta(days=30)
+                time_period = datetime.timedelta(days=30)  # approximates a month
                 period_end = datetime.datetime.now()
                 period_start = period_end-time_period
             elif time_period == "3":
-                time_period = datetime.timedelta(days=183)
+                time_period = datetime.timedelta(days=183)  # approximates 6 months
                 period_end = datetime.datetime.now()
                 period_start = period_end-time_period
             elif time_period == "4":
-                period_end = datetime.datetime(year=3000, month=1, day=1, hour=0, minute=0, second=0)
+                period_end = datetime.datetime(year=3000, month=1, day=1, hour=0, minute=0, second=0)  # far-future/past bounds so every review in the file falls inside the range
                 period_start = datetime.datetime(year=1900, month=1, day=1, hour=0, minute=0, second=0)
             elif time_period == "5":
                 while True:
@@ -521,7 +528,7 @@ def get_period():
                         while True:
                             try:
                                 period_start = input("Enter start date and time (year-mm-dd hh:mm:ss): ")
-                                if matches := re.search(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$", period_start):
+                                if matches := re.search(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$", period_start):  # enforces the yyyy-mm-dd hh:mm:ss format before trying to parse it
                                     period_start = datetime.datetime(year=int(matches.group(1)), month=int(matches.group(2)), day=int(matches.group(3)), hour=int(matches.group(4)), minute=int(matches.group(5)), second=int(matches.group(6)))
                                 else:
                                     raise ValueError
@@ -556,12 +563,13 @@ def get_period():
     
 
 def ingestor(period_start, period_end, file_name):
+    """Reads reviews from a CSV file, keeps only the ones inside the given date range, and returns them as Review objects plus a count."""
     all_reviews = []
     with open(file_name) as file:
         reader = csv.DictReader(file)
 
         reviews_count = 0
-        for row in sorted(reader, key=lambda d: d["date_string"], reverse=True):
+        for row in sorted(reader, key=lambda d: d["date_string"], reverse=True):  # newest reviews first
             
             if matches := re.search(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$", row["date_string"]):
                 date = datetime.datetime(year=int(matches.group(1)), month=int(matches.group(2)), day=int(matches.group(3)), hour=int(matches.group(4)), minute=int(matches.group(5)), second=int(matches.group(6)))
@@ -570,8 +578,8 @@ def ingestor(period_start, period_end, file_name):
 
             if date >= period_start and date <= period_end:
                 if reviews_count == 0:
-                    last_review = review
-                first_review = review
+                    last_review = review  # since rows are newest-first, the first one we hit in-range is the most recent review
+                first_review = review  # keeps getting overwritten as we go, so it ends up being the oldest review in range
                 reviews_count += 1
                 
                 all_reviews.append(review)
@@ -582,7 +590,7 @@ def ingestor(period_start, period_end, file_name):
 Loaded {reviews_count} reviews from {first_review.timestamp} to {last_review.timestamp} date range. 
 ###
                 """)
-        except UnboundLocalError:
+        except UnboundLocalError:  # first_review/last_review were never set, meaning no reviews fell inside the chosen period
             console.print(Text(f"""
 ############################
 NO DATA FOR THIS TIME PERIOD
@@ -594,6 +602,7 @@ NO DATA FOR THIS TIME PERIOD
     return (all_reviews, reviews_count)
 
 def categorize_review(review):
+    """Matches the review's text against each category's keyword set and returns the set of categories it belongs to, or {'Other'} if nothing matched."""
     categories = set()
     text = review.text.lower()
     categories_count = 0
@@ -608,7 +617,8 @@ def categorize_review(review):
         return categories
     
 def sentimentize_review(review):
-    review_text_splitted = re.split(r"but|although|and|however|though|while|except|whereas|also|plus|besides|!|,|;|\.|\?|\n|\t", review.text.lower())
+    """Splits the review into clauses, scores each clause's sentiment for every category it belongs to, and returns the average score per category."""
+    review_text_splitted = re.split(r"but|although|and|however|though|while|except|whereas|also|plus|besides|!|,|;|\.|\?|\n|\t", review.text.lower())  # split into clauses so mixed-sentiment reviews don't just average out to neutral
     sentiment_dict = {}
 
     for category_kw in review.category:
@@ -620,7 +630,7 @@ def sentimentize_review(review):
                 for key_word in categories_kw[category_kw]:
                     if key_word in phrase:
                         sentiment_dict[category_kw].append(score)
-            except KeyError:
+            except KeyError:  # category_kw is "Other", which has no keyword set, so every clause counts toward it
                 sentiment_dict[category_kw].append(score)
 
         sentiment_dict[category_kw] = round(statistics.mean(sentiment_dict[category_kw]), 2)
@@ -628,6 +638,7 @@ def sentimentize_review(review):
     return sentiment_dict
 
 def get_keywords(review):
+    """Scores each clause of the review and buckets its keywords into positive/negative Counters per category, so a score can be explained by the words behind it."""
     review_text_splitted = re.split(r"but|although|and|however|though|while|except|whereas|also|plus|besides|!|,|;|\.|\?|\n|\t", review.text.lower())
     positive_kw_dict = {}
     negative_kw_dict = {}
@@ -641,12 +652,12 @@ def get_keywords(review):
             words = phrase.split(" ")
             try:
                 for key_word in categories_kw[category_kw]:
-                    if key_word in words and not (key_word in umbrella_words[category_kw]):
-                        if score >= 80:
+                    if key_word in words and not (key_word in umbrella_words[category_kw]):  # skip umbrella words (e.g. "staff", "price") since they're too generic to be a useful keyword
+                        if score >= 80:  # clause reads strongly positive
                                 positive_kw_dict[category_kw].update([key_word])
-                        elif score <= 60: 
+                        elif score <= 60:  # clause reads negative or lukewarm
                             negative_kw_dict[category_kw].update([key_word])
-            except KeyError:
+            except KeyError:  # category_kw is "Other", which has no keyword set to check against
                 if score >= 80:
                     positive_kw_dict[category_kw].update([key_word])
                 elif score <= 60: 
@@ -655,6 +666,7 @@ def get_keywords(review):
     return (positive_kw_dict, negative_kw_dict)
 
 def refine_score(review, score):
+    """Blends a review's star rating with its VADER compound score into a single 0-100 sentiment score (70% stars, 30% text sentiment)."""
     stars = review.stars
     stars_to_vader = {
         "1": -1.0,
@@ -665,9 +677,9 @@ def refine_score(review, score):
     }
     stars = stars_to_vader[stars]
     if review.text == "":
-        score = ((stars + 1) / 2) * 100
+        score = ((stars + 1) / 2) * 100  # no text to analyze, so fall back to the star rating alone
     else:
-        score = round(((stars*0.7 + score*0.3) + 1) / 2 * 100)
+        score = round(((stars*0.7 + score*0.3) + 1) / 2 * 100)  # 70% star rating, 30% text sentiment, rescaled from [-1, 1] to [0, 100]
             
     return score
 

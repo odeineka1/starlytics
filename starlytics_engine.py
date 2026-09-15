@@ -18,6 +18,7 @@ categories_kw = categories_kw
 console = Console()
 
 class StarlyticsEngine:
+    """Runs the analysis pipeline for one business: category averages, alerts, trends, keyword aggregation, and the AI-generated report. A Solo Report uses one shared engine; a Battle Report spins up one engine per business so their numbers stay separate."""
     def __init__(self):
         self.review_count_general_threshold = 3
         self.review_count_category_threshold = 2
@@ -32,6 +33,7 @@ class StarlyticsEngine:
     
     @review_count_general_threshold.setter
     def review_count_general_threshold(self, review_count_general_threshold):
+        # validated here so Settings can't be set to something that would break check_for_alerts()
         if isinstance(review_count_general_threshold, int) and review_count_general_threshold > -1:
             self._review_count_general_threshold = review_count_general_threshold
         else:
@@ -72,6 +74,7 @@ class StarlyticsEngine:
 
 
     def caculate_category_means(self, all_reviews, engine):
+        """Averages each review's per-category sentiment into one score per category (self.oe_mean, self.vp_mean, etc), either as a plain mean or recency-weighted if enabled."""
         self.all_reviews = all_reviews
 
         oe_category = []
@@ -88,7 +91,7 @@ class StarlyticsEngine:
             self.last_review_date = self.all_reviews[0].timestamp
             for review in self.all_reviews:
                 recency = (self.last_review_date-review.timestamp).days
-                weight = 0.5**(recency/90)
+                weight = 0.5**(recency/90)  # exponential decay: a review's influence halves every 90 days, so recent reviews dominate the score
                 if "Operational Efficiency" in review.category:
                     oe_category.append(review.sentiment["Operational Efficiency"]*weight)
                     oe_weights += weight
@@ -106,7 +109,7 @@ class StarlyticsEngine:
                     other_weights += weight
             
             if len(oe_category) != 0:
-                self.oe_mean = round(sum(oe_category)/oe_weights)
+                self.oe_mean = round(sum(oe_category)/oe_weights)  # weighted average: sum of (score*weight) divided by sum of weights
             else:
                 self.oe_mean = "No Data"
             if len(vp_category) != 0:
@@ -161,6 +164,7 @@ class StarlyticsEngine:
                 self.other_mean = "No Data"
     
     def generate_trend_text(self):
+        """Builds the human-readable Rich Text shown next to each category's score (e.g. "+6.20 vs. prev. week, Improving!"), based on the trend values calculate_trends() already computed."""
         self.oe_trend_text = ""
         self.vp_trend_text = ""
         self.pe_trend_text = ""
@@ -168,14 +172,14 @@ class StarlyticsEngine:
         self.other_trend_text = ""
         if self.week_trend_flag:
             try: 
-                if self.oe_trend > 5:
+                if self.oe_trend > 5:  # more than a 5-point swing counts as a real change, not noise
                     self.oe_trend_text = Text(f"(latest* week is +{self.oe_trend:.2f} vs. prev. week) Improving!", style="bold green")
                 elif self.oe_trend < -5:
                     self.oe_trend_text = Text(f"(latest* week is {self.oe_trend:.2f} vs. prev. week) Declining!", style="bold red")
                 else:
                     symbol = "+" if self.oe_trend >= 0 else ""
                     self.oe_trend_text = Text(f"(latest* week is {symbol}{self.oe_trend:.2f} vs. prev. week) Stable.", style="bold yellow")
-            except TypeError:
+            except TypeError:  # self.oe_trend is "No Data" (a string), so the comparisons above raise TypeError and we just leave the text blank
                 pass
 
             try:
@@ -279,6 +283,7 @@ class StarlyticsEngine:
                 pass
 
     def generate_report(self, reviews_count, total_time, business_name):
+        """Renders the full Solo Report to the terminal: per-category score/trend table, alert panel, and the overall summary panel."""
         self.generate_trend_text()
 
         console.print()
@@ -302,13 +307,13 @@ class StarlyticsEngine:
                 try:
                     average_trend += trend
                     trend_score += 1
-                except TypeError:
+                except TypeError:  # this category's trend is "No Data", skip it rather than let it break the average
                     pass
             if trend_score != 0:
                 average_trend = average_trend/trend_score
             else: 
                 average_trend = "No Data"
-        except AttributeError:
+        except AttributeError:  # calculate_trends() never ran (e.g. week_trend_flag/month_trend_flag both false), so the trend attributes don't exist yet
             average_trend = "No Data"
 
         average_score = 0
@@ -327,13 +332,13 @@ class StarlyticsEngine:
                 pass
             try:
                 score_val = float(mean)
-                if score_val >= 65:
+                if score_val >= 65:  # green/yellow/red banding for the score column
                     mean_text = Text(f"{str(mean)}/100", style="bold green")
                 elif score_val >= 50:
                     mean_text = Text(f"{str(mean)}/100", style="bold yellow")
                 else:
                     mean_text = Text(f"{str(mean)}/100", style="bold red")
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # mean is the string "No Data", can't be cast to float
                 mean_text = Text(str(mean), style="dim")
             table.add_row(name, mean_text, trend_text)
 
@@ -430,6 +435,7 @@ class StarlyticsEngine:
         console.print()   
 
     def generate_battle_report(self, engine1, engine2, reviews_count1, reviews_count2, total_time1, total_time2, business1_name, business2_name):
+        """Renders the full Battle Report: a side-by-side score/trend table for both businesses, an alert panel per business, and a summary panel naming the score/trend/volume winners."""
         engine1.generate_trend_text()
         engine2.generate_trend_text()
         
@@ -551,6 +557,7 @@ class StarlyticsEngine:
         else:
             score_winner = "Draw"
         
+        # handles every combination of "one/both businesses have No Data" so the trend winner never crashes on a string vs. number comparison
         if average_trend1 == "No Data" and average_trend2 != "No Data" and average_trend2 > 0:
             trend_winner = business2_name
         elif average_trend1 == "No Data" and average_trend2 != "No Data" and average_trend2 <= 0:
@@ -712,6 +719,7 @@ class StarlyticsEngine:
         console.print(Rule(style="bright_cyan"))
 
     def check_for_alerts(self, all_reviews):
+        """Scans reviews from the last `time_delta_hours` hours and sets self.general_alert_status / self.category_alert_status based on how many low-sentiment reviews showed up, general and per-category."""
         self.all_reviews = all_reviews
         self.time_delta = datetime.timedelta(hours=self.time_delta_hours)
         now_time  = datetime.datetime.now()
@@ -721,7 +729,7 @@ class StarlyticsEngine:
         self.category_flags = {"Operational Efficiency": 0, "Value Proposition": 0, "Physical Environment": 0, "Product/Offering": 0, "Other": 0}
         category_flag = 0
         for review in self.all_reviews:
-            if review.timestamp >= in_range_date:
+            if review.timestamp >= in_range_date:  # reviews are assumed sorted newest-first, so once we hit one outside the window we can stop
                 general_flag = 0
                 for category_sentiment in review.sentiment.keys():
                     if review.sentiment[category_sentiment] < self.sentiment_threshold:
@@ -745,6 +753,7 @@ class StarlyticsEngine:
             self.category_alert_status = False
     
     def calculate_trends(self, all_reviews):
+        """Compares the most recent week (or month, for longer periods) of sentiment against the one before it, per category, and stores the difference as self.oe_trend, self.vp_trend, etc."""
         self.all_reviews = all_reviews
         self.last_review_date = self.all_reviews[0].timestamp
         self.first_review_date = self.all_reviews[len(self.all_reviews)-1].timestamp
@@ -755,7 +764,7 @@ class StarlyticsEngine:
         self.week_trend_flag = False
         self.month_trend_flag = False
 
-        if week < timespan <= month:
+        if week < timespan <= month:  # period is between 1 week and 1 month long, so week-over-week is the most meaningful comparison
             self.week_trend_flag = True
             last_review_week = self.last_review_date.isocalendar()[1]
             week_ago = last_review_week-1
@@ -799,7 +808,7 @@ class StarlyticsEngine:
                 self.other_trend = last_week_sentiment["Other"]-week_ago_sentiment["Other"]
             else:
                 self.other_trend = "No Data"
-        elif timespan > month:
+        elif timespan > month:  # period is longer than a month, so month-over-month is more useful than week-over-week
             self.month_trend_flag = True
             self.last_month_review_date = self.last_review_date.month
             self.previous_month_review_date = self.last_month_review_date - 1
@@ -843,8 +852,11 @@ class StarlyticsEngine:
                 self.other_trend = last_month_sentiment["Other"]-month_ago_sentiment["Other"]
             else:
                 self.other_trend = "No Data"
-    
+        # if the period is a week or shorter, neither flag gets set and no trend attributes exist yet —
+        # generate_report() handles that case via the AttributeError catch around the trend average
+
     def process_keywords(self, all_reviews):
+        """Aggregates each review's positive/negative keywords into one Counter per category, then keeps only the top 10 of each for the report and AI prompt."""
         self.oe_positive_kw = Counter()
         self.oe_negative_kw = Counter()
 
@@ -887,7 +899,7 @@ class StarlyticsEngine:
                 else:
                     self.other_negative_kw += negative_keywords[category]
         
-        self.oe_positive_kw = self.oe_positive_kw.most_common(10)
+        self.oe_positive_kw = self.oe_positive_kw.most_common(10)  # cap at top 10 so the AI prompt and report table don't balloon on high-volume categories
         self.oe_negative_kw = self.oe_negative_kw.most_common(10)
         
         self.vp_positive_kw = self.vp_positive_kw.most_common(10)
@@ -914,6 +926,7 @@ class StarlyticsEngine:
         # print()
     
     def generate_ai_insight(self):
+        """Sends the category scores, trends, and top keywords to Gemini and prints back a strategy report; handles missing/invalid API keys and Gemini server/client errors with friendly panels instead of a crash."""
         try:
             client = genai.Client()
             key_words = "Operational Efficiency Positive Keywords: "
@@ -966,6 +979,9 @@ class StarlyticsEngine:
             ]:
                 scores += f"{name}: {mean} {trend_text}\n"
                 
+            # this prompt is deliberately strict about structure/formatting (exact section headers, no
+            # markdown asterisks, numbered lists only in one section, etc.) so the Rich Markdown renderer
+            # displays it consistently in the terminal every time
             prompt = f"""You are a business analytics expert. Analyze the following customer review data and provide insights. Your task is to analyze aggregated keyword frequency data and write a fluid, professional strategic report.
     
     SCORES AND TRENDS:
@@ -1016,7 +1032,7 @@ class StarlyticsEngine:
                 console.print(md)
                 console.print()
                 console.print(Rule(style="bright_cyan"))
-            except genai.errors.ServerError:
+            except genai.errors.ServerError:  # Gemini backend is overloaded/down (503) — show a friendly panel instead of a stack trace
                 error_message = (
                     "[bold red]❌ AI KEYWORD ANALYSIS FAILED[/]\n\n"
                     "The Gemini (Starlytics AI engine) servers are currently experiencing a heavy traffic spike\n"
@@ -1036,7 +1052,7 @@ class StarlyticsEngine:
                     )
                 )
             except genai.errors.ClientError as error:
-                if error.code == 400:
+                if error.code == 400:  # invalid/malformed API key
                     console.print(Rule(style="bright_cyan"))
                     error_message = Text()  
                     error_message.append("Your Gemini API Key is invalid.\n\nGo to Starlytics Settings, choose \"Set Gemini API Key\" (7th option), and enter valid Google Studio Gemini API Key.\n\nError Code: 400")
@@ -1048,7 +1064,7 @@ class StarlyticsEngine:
                         padding=(1, 2)
                         )   
                     )
-                elif error.code == 429:
+                elif error.code == 429:  # free-tier daily request quota used up
                     console.print(Rule(style="bright_cyan"))
                     error_message = Text()  
                     error_message.append("Your daily free tier quota for current Gemini API Key has been reached.\n")
@@ -1068,7 +1084,7 @@ class StarlyticsEngine:
                         padding=(1, 2)
                         )   
                     )
-                else:
+                else:  # any other Gemini client error, no specific handling written for it yet
                     console.print(Rule(style="bright_cyan"))
                     error_message = Text()  
                     error_message.append("Contact the developer with your problem")
@@ -1081,7 +1097,7 @@ class StarlyticsEngine:
                         padding=(1, 2)
                         )   
                     )
-        except ValueError:
+        except ValueError:  # genai.Client() raises this when GEMINI_API_KEY isn't set at all
             console.print(Rule(style="bright_cyan"))
             error_message = Text()
             error_message.append("⚠️  Starlytics requires a valid Gemini API key to generate AI keyword analysis and strategy.\n\n", style="white")
@@ -1106,6 +1122,7 @@ class StarlyticsEngine:
             )
     
     def generate_competitive_ai_insight(self, engine1, engine2, business_name1, business_name2):
+        """Same idea as generate_ai_insight(), but sends both businesses' scores/keywords to Gemini in one prompt and asks for a head-to-head competitive report instead of a single-business strategy report."""
         try:
             client = genai.Client()
             key_words1 = f"Business {business_name1} Operational Efficiency Positive Keywords: "
